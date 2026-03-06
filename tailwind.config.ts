@@ -47,6 +47,9 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        "system-bubble": "hsl(var(--system-bubble))",
+        "user-bubble": "hsl(var(--user-bubble))",
+        "assistant-bubble": "hsl(var(--assistant-bubble))",
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
           foreground: "hsl(var(--sidebar-foreground))",
