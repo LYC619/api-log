@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y curl && \
 
 WORKDIR /frontend
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm install
 COPY index.html vite.config.ts tsconfig*.json tailwind.config.ts postcss.config.js components.json ./
 COPY public/ public/
 COPY src/ src/
