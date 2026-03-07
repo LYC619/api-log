@@ -326,6 +326,7 @@ function LogDetail({ log, parseMessages, parseToolCalls, onExportConversation }:
   parseToolCalls: (s: string | null) => unknown[];
   onExportConversation: () => void;
 }) {
+}) {
   const messages = log.messages ? parseMessages(log.messages) : [];
   const systemMessages = messages.filter((m) => m.role === "system");
   const chatMessages = messages.filter((m) => m.role !== "system");
