@@ -161,7 +161,18 @@ async def lifespan(app: FastAPI):
     await init_db()
     saved_pw = await get_setting("admin_password", None)
     if saved_pw:
-        ADMIN_PASSWORD = saved_pw
+        if len(saved_pw) != 64:
+            # Legacy plaintext password — hash and save
+            hashed = hash_password(saved_pw)
+            await set_setting("admin_password", hashed)
+            ADMIN_PASSWORD = hashed
+        else:
+            ADMIN_PASSWORD = saved_pw
+    else:
+        # Use env var, hash it, and store
+        env_pw = os.environ.get("ADMIN_PASSWORD", "admin123")
+        ADMIN_PASSWORD = hash_password(env_pw)
+        await set_setting("admin_password", ADMIN_PASSWORD)
     cleanup_task = asyncio.create_task(_log_cleanup_task())
     yield
     cleanup_task.cancel()
