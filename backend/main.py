@@ -412,6 +412,8 @@ async def admin_clear_logs(_=Depends(verify_admin)):
 async def admin_backup(_=Depends(verify_admin)):
     if not os.path.isfile(DB_PATH):
         raise HTTPException(404, "Database file not found")
+    db = await get_db()
+    await db.execute("PRAGMA wal_checkpoint(FULL)")
     return FileResponse(DB_PATH, filename="proxy.db", media_type="application/octet-stream")
 
 
