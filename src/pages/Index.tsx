@@ -14,6 +14,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 // Lazy load pages for code splitting
 const DashboardPage = lazy(() => import("@/pages/DashboardPage"));
 const LogsPage = lazy(() => import("@/pages/LogsPage"));
+const FavoritesPage = lazy(() => import("@/pages/FavoritesPage"));
 const UpstreamsPage = lazy(() => import("@/pages/UpstreamsPage"));
 const KeysPage = lazy(() => import("@/pages/KeysPage"));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
