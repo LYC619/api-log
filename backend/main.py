@@ -413,8 +413,9 @@ async def admin_change_password(request: Request, _=Depends(verify_admin)):
     global ADMIN_PASSWORD
     body = await request.json()
     new_password = body["password"]
-    ADMIN_PASSWORD = new_password
-    await set_setting("admin_password", new_password)
+    hashed = hash_password(new_password)
+    ADMIN_PASSWORD = hashed
+    await set_setting("admin_password", hashed)
     return {"ok": True}
 
 

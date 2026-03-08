@@ -6,6 +6,7 @@ version: "3.8"
 services:
   api-log:
     build: .
+    # host 模式方便代理访问 localhost 上游；如在云平台部署改为 ports 映射
     network_mode: host
     environment:
       - UPSTREAM_URL=${UPSTREAM_URL:-http://127.0.0.1:3000}
