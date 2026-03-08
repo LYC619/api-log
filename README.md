@@ -98,11 +98,18 @@ UPSTREAM_URL=http://127.0.0.1:3000 ADMIN_PASSWORD=yourpassword python main.py
 | `DB_PATH` | SQLite database file path | `/data/proxy.db` |
 | `APP_VERSION` | Version string shown in settings | `1.0.0` |
 
+### 💡 Usage Scenario
+
+> **The simplest way to use API Log**: You normally use `api.provider.com` for your AI requests. When you want to log a specific conversation, just change the API URL to `api-log.yourdomain.com` in your client settings — everything else (API key, model, parameters) stays the same. Switch back when you're done. That's it.
+
 ### 📖 Usage
 
 1. **Add Upstream** — Go to "上游管理" (Upstream Management) to add your API provider endpoints
 2. **View Logs** — All proxied chat completion requests are logged in "请求日志" (Request Logs)
-3. **Client Configuration** — Point your AI client (Cherry Studio, ChatBox, etc.) to `http://your-server:7891` as the API base URL, using your existing API keys
+3. **Star & Tag** — Star important prompts and add tags for easy categorization
+4. **Add Notes** — Record context about why a prompt was interesting
+5. **Copy Prompts** — One-click copy of the full prompt for reuse elsewhere
+6. **Client Configuration** — Point your AI client (Cherry Studio, ChatBox, etc.) to `http://your-server:7891` as the API base URL, using your existing API keys
 
 ### ⚠️ Important Notes
 
