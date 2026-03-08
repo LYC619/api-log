@@ -3,6 +3,7 @@ import re
 import json
 import time
 import asyncio
+import hashlib
 import httpx
 from datetime import datetime
 from collections import defaultdict
@@ -23,7 +24,11 @@ from database import (
 )
 
 UPSTREAM_URL = os.environ.get("UPSTREAM_URL", "http://127.0.0.1:3000")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
+ADMIN_PASSWORD = ""  # will be set to hash in lifespan
+
+
+def hash_password(pw: str) -> str:
+    return hashlib.sha256(pw.encode("utf-8")).hexdigest()
 PORT = int(os.environ.get("PORT", "7891"))
 VERSION = os.environ.get("APP_VERSION", "1.0.0")
 
@@ -156,7 +161,18 @@ async def lifespan(app: FastAPI):
     await init_db()
     saved_pw = await get_setting("admin_password", None)
     if saved_pw:
-        ADMIN_PASSWORD = saved_pw
+        if len(saved_pw) != 64:
+            # Legacy plaintext password — hash and save
+            hashed = hash_password(saved_pw)
+            await set_setting("admin_password", hashed)
+            ADMIN_PASSWORD = hashed
+        else:
+            ADMIN_PASSWORD = saved_pw
+    else:
+        # Use env var, hash it, and store
+        env_pw = os.environ.get("ADMIN_PASSWORD", "admin123")
+        ADMIN_PASSWORD = hash_password(env_pw)
+        await set_setting("admin_password", ADMIN_PASSWORD)
     cleanup_task = asyncio.create_task(_log_cleanup_task())
     yield
     cleanup_task.cancel()
@@ -397,8 +413,9 @@ async def admin_change_password(request: Request, _=Depends(verify_admin)):
     global ADMIN_PASSWORD
     body = await request.json()
     new_password = body["password"]
-    ADMIN_PASSWORD = new_password
-    await set_setting("admin_password", new_password)
+    hashed = hash_password(new_password)
+    ADMIN_PASSWORD = hashed
+    await set_setting("admin_password", hashed)
     return {"ok": True}
 
 

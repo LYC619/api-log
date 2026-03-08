@@ -12,7 +12,7 @@
 
 API Log is a lightweight, self-hosted AI API transparent proxy that automatically records complete request context, assistant replies, and token usage for every conversation.
 
-> **Note**: API Log forces all streaming requests to non-streaming mode to ensure complete `usage` data is captured. Clients will not see a typewriter effect — this tool is designed for prompt logging and debugging scenarios.
+> **Note**: API Log now supports transparent streaming proxy — streaming requests are forwarded as-is while still logging complete conversation data in the background.
 
 ### ✨ Features
 
@@ -44,6 +44,8 @@ docker run -d \
   -v api-log-data:/data \
   ghcr.io/lyc619/api-log:latest
 ```
+
+> **Note**: `--network host` lets the container access upstream services on localhost. For cloud deployments, use `-p 7891:7891` instead.
 
 #### Docker Compose
 
@@ -113,8 +115,8 @@ UPSTREAM_URL=http://127.0.0.1:3000 ADMIN_PASSWORD=yourpassword python main.py
 
 ### ⚠️ Important Notes
 
-- All streaming requests are automatically converted to non-streaming. Clients will receive the full response at once (no typewriter effect)
-- This is by design to ensure complete token usage data is always captured
+- Streaming requests are transparently proxied — clients receive SSE streams as expected while API Log captures complete conversation data in the background
+- Admin passwords are stored as SHA-256 hashes; plaintext passwords are never persisted
 - Best suited for prompt logging, debugging, and API usage auditing
 
 ### 🛠 Tech Stack
@@ -135,7 +137,7 @@ MIT
 
 API Log 是一个轻量级、可自托管的 AI API 透明代理，自动记录所有请求的完整上下文、回复内容和 Token 用量。
 
-> **注意**：API Log 会将所有流式请求转为非流式，以确保完整记录 `usage` 数据。客户端不会有打字机效果，适合用于提示词记录和调试场景。
+> **注意**：API Log 现在支持透明流式代理——流式请求原样转发给客户端，同时在后台完整记录对话数据。
 
 ### ✨ 功能特点
 
@@ -236,8 +238,8 @@ UPSTREAM_URL=http://127.0.0.1:3000 ADMIN_PASSWORD=你的密码 python main.py
 
 ### ⚠️ 注意事项
 
-- 所有流式请求会自动转为非流式，客户端将一次性收到完整响应（无打字机效果）
-- 这是有意设计，以确保每次请求都能完整记录 Token 用量数据
+- 流式请求透明代理——客户端正常接收 SSE 流式响应，API Log 在后台完整记录对话数据
+- 管理员密码以 SHA-256 哈希存储，明文密码不会持久化
 - 最适合用于提示词记录、调试和 API 用量审计
 
 ### 🛠 技术栈

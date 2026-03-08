@@ -11,9 +11,18 @@ export function getAdminPassword() {
   return adminPassword;
 }
 
+async function hashPassword(pw: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(pw);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
 async function apiFetch(path: string, options: RequestInit = {}) {
   const headers = new Headers(options.headers);
-  headers.set("x-admin-password", adminPassword);
+  const hashed = await hashPassword(adminPassword);
+  headers.set("x-admin-password", hashed);
   const resp = await fetch(`${API_BASE}${path}`, { ...options, headers });
   if (resp.status === 401) throw new Error("Unauthorized");
   if (resp.status === 429) {
@@ -25,10 +34,11 @@ async function apiFetch(path: string, options: RequestInit = {}) {
 }
 
 export async function login(password: string) {
+  const hashed = await hashPassword(password);
   const resp = await fetch(`${API_BASE}/admin/api/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ password: hashed }),
   });
   if (resp.status === 429) {
     const data = await resp.json().catch(() => ({}));
@@ -256,7 +266,8 @@ export async function clearAllLogs() {
 
 export async function downloadBackup() {
   const headers = new Headers();
-  headers.set("x-admin-password", adminPassword);
+  const hashed = await hashPassword(adminPassword);
+  headers.set("x-admin-password", hashed);
   const resp = await fetch(`${API_BASE}/admin/api/settings/backup`, { headers });
   if (!resp.ok) throw new Error("Backup failed");
   return resp.blob();
