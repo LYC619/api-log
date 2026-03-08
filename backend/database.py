@@ -406,6 +406,40 @@ async def clear_all_logs():
         await db.commit()
 
 
+async def update_log_starred(log_id: int, is_starred: bool):
+    async with _write_lock:
+        db = await get_db()
+        await db.execute("UPDATE logs SET is_starred=? WHERE id=?", (1 if is_starred else 0, log_id))
+        await db.commit()
+
+
+async def update_log_tags(log_id: int, tags: str):
+    async with _write_lock:
+        db = await get_db()
+        await db.execute("UPDATE logs SET tags=? WHERE id=?", (tags, log_id))
+        await db.commit()
+
+
+async def update_log_note(log_id: int, note: str):
+    async with _write_lock:
+        db = await get_db()
+        await db.execute("UPDATE logs SET note=? WHERE id=?", (note, log_id))
+        await db.commit()
+
+
+async def get_all_tags():
+    db = await get_db()
+    cursor = await db.execute("SELECT DISTINCT tags FROM logs WHERE tags != '' AND tags IS NOT NULL")
+    rows = await cursor.fetchall()
+    tag_set = set()
+    for row in rows:
+        for t in row[0].split(","):
+            t = t.strip()
+            if t:
+                tag_set.add(t)
+    return sorted(tag_set)
+
+
 async def clean_old_logs(days: int):
     async with _write_lock:
         db = await get_db()
