@@ -19,6 +19,7 @@ from database import (
     delete_upstream, activate_upstream, get_active_upstream, increment_upstream_stats,
     get_api_keys, update_api_key_note, track_api_key,
     get_db_size, clear_all_logs, clean_old_logs, increment_model_list_count, DB_PATH,
+    update_log_starred, update_log_tags, update_log_note, get_all_tags,
 )
 
 UPSTREAM_URL = os.environ.get("UPSTREAM_URL", "http://127.0.0.1:3000")
@@ -179,10 +180,12 @@ async def admin_get_logs(
     request: Request,
     model: str = None, start_time: str = None, end_time: str = None,
     status_code: int = None, upstream_name: str = None, keyword: str = None,
+    starred: bool = False, tag: str = None,
     page: int = 1, page_size: int = 50,
     _=Depends(verify_admin),
 ):
-    return await get_logs(model, start_time, end_time, status_code, upstream_name, keyword, page, page_size)
+    return await get_logs(model, start_time, end_time, status_code, upstream_name, keyword,
+                          starred_only=starred, tag=tag, page=page, page_size=page_size)
 
 
 @app.get("/admin/api/logs/export")
@@ -198,7 +201,34 @@ async def admin_export_logs(
     })
 
 
+@app.patch("/admin/api/logs/{log_id}/star")
+async def admin_toggle_star(log_id: int, request: Request, _=Depends(verify_admin)):
+    body = await request.json()
+    await update_log_starred(log_id, body.get("is_starred", False))
+    return {"ok": True}
+
+
+@app.patch("/admin/api/logs/{log_id}/tags")
+async def admin_update_tags(log_id: int, request: Request, _=Depends(verify_admin)):
+    body = await request.json()
+    await update_log_tags(log_id, body.get("tags", ""))
+    return {"ok": True}
+
+
+@app.patch("/admin/api/logs/{log_id}/note")
+async def admin_update_note(log_id: int, request: Request, _=Depends(verify_admin)):
+    body = await request.json()
+    await update_log_note(log_id, body.get("note", ""))
+    return {"ok": True}
+
+
+@app.get("/admin/api/tags")
+async def admin_get_tags(_=Depends(verify_admin)):
+    return await get_all_tags()
+
+
 # ─── Upstream management ────────────────────────────────────
+
 
 @app.get("/admin/api/upstreams")
 async def admin_get_upstreams(_=Depends(verify_admin)):

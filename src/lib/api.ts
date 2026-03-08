@@ -60,6 +60,9 @@ export interface LogEntry {
   upstream_name: string | null;
   status_code: number | null;
   error_message: string | null;
+  is_starred: number;
+  tags: string;
+  note: string;
 }
 
 export async function fetchLogs(params: {
@@ -69,6 +72,8 @@ export async function fetchLogs(params: {
   status_code?: number;
   upstream_name?: string;
   keyword?: string;
+  starred?: boolean;
+  tag?: string;
   page?: number;
 }) {
   const qs = new URLSearchParams();
@@ -78,6 +83,8 @@ export async function fetchLogs(params: {
   if (params.status_code) qs.set("status_code", String(params.status_code));
   if (params.upstream_name) qs.set("upstream_name", params.upstream_name);
   if (params.keyword) qs.set("keyword", params.keyword);
+  if (params.starred) qs.set("starred", "true");
+  if (params.tag) qs.set("tag", params.tag);
   if (params.page) qs.set("page", String(params.page));
   return apiFetch(`/admin/api/logs?${qs.toString()}`) as Promise<{
     logs: LogEntry[];
@@ -253,4 +260,34 @@ export async function downloadBackup() {
   const resp = await fetch(`${API_BASE}/admin/api/settings/backup`, { headers });
   if (!resp.ok) throw new Error("Backup failed");
   return resp.blob();
+}
+
+// ─── Log actions ────────────────────────────────────────────
+
+export async function toggleLogStar(id: number, is_starred: boolean) {
+  return apiFetch(`/admin/api/logs/${id}/star`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ is_starred }),
+  });
+}
+
+export async function updateLogTags(id: number, tags: string) {
+  return apiFetch(`/admin/api/logs/${id}/tags`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tags }),
+  });
+}
+
+export async function updateLogNote(id: number, note: string) {
+  return apiFetch(`/admin/api/logs/${id}/note`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note }),
+  });
+}
+
+export async function fetchTags() {
+  return apiFetch("/admin/api/tags") as Promise<string[]>;
 }
