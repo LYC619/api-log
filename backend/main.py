@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import (
-    init_db, close_db, insert_log, get_logs, get_setting, set_setting,
+    init_db, close_db, get_db, insert_log, get_logs, get_setting, set_setting,
     get_dashboard_stats, get_upstreams, add_upstream, update_upstream,
     delete_upstream, activate_upstream, get_active_upstream, increment_upstream_stats,
     get_api_keys, update_api_key_note, track_api_key,
