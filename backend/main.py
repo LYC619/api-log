@@ -19,6 +19,7 @@ from database import (
     delete_upstream, activate_upstream, get_active_upstream, increment_upstream_stats,
     get_api_keys, update_api_key_note, track_api_key,
     get_db_size, clear_all_logs, clean_old_logs, increment_model_list_count, DB_PATH,
+    update_log_starred, update_log_tags, update_log_note, get_all_tags,
 )
 
 UPSTREAM_URL = os.environ.get("UPSTREAM_URL", "http://127.0.0.1:3000")
