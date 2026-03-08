@@ -584,6 +584,104 @@ async def proxy(request: Request, path: str):
     )
 
 
+async def _handle_streaming_proxy(
+    request: Request, path: str, target_url: str, headers: dict, body: bytes,
+    request_data: dict, log_enabled: bool, log_only_errors: bool,
+    upstream_name: str, upstream_id: int | None,
+    client_ip: str, api_key_hint: str, start_time: float,
+):
+    """Handle streaming chat completion: passthrough SSE to client, collect chunks for logging."""
+    collected_chunks = []
+
+    async def stream_generator():
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0)) as client:
+            async with client.stream(
+                method=request.method, url=target_url, headers=headers, content=body,
+            ) as resp:
+                # Yield status/headers info won't work with StreamingResponse directly,
+                # but we need to handle non-200 separately
+                stream_generator.status_code = resp.status_code
+                stream_generator.resp_headers = dict(resp.headers)
+
+                async for line in resp.aiter_lines():
+                    yield f"{line}\n\n"
+
+                    # Collect SSE data lines for logging
+                    stripped = line.strip()
+                    if stripped.startswith("data: ") and stripped != "data: [DONE]":
+                        try:
+                            chunk_json = json.loads(stripped[6:])
+                            collected_chunks.append(chunk_json)
+                        except json.JSONDecodeError:
+                            pass
+
+    stream_generator.status_code = 200
+    stream_generator.resp_headers = {}
+
+    # We need to consume the generator to get status code, so use a wrapper
+    async def wrapped_generator():
+        async for chunk in stream_generator():
+            yield chunk.encode("utf-8") if isinstance(chunk, str) else chunk
+
+    # Create response with streaming
+    response = StreamingResponse(
+        wrapped_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+    # Background logging after stream completes
+    original_body_iterator = response.body_iterator
+
+    async def logging_body_iterator():
+        async for chunk in original_body_iterator:
+            yield chunk
+
+        # Stream finished, now log
+        duration_ms = int((time.time() - start_time) * 1000)
+        status_code = stream_generator.status_code
+        should_log = log_enabled and (not log_only_errors or status_code != 200)
+
+        if should_log and collected_chunks:
+            try:
+                parsed = parse_streaming_chunks(collected_chunks)
+                usage = parsed["usage"]
+                model_name = (request_data.get("model") if request_data else None) or parsed["model"]
+
+                log_data = {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "model": model_name,
+                    "messages": request_data.get("messages") if request_data else None,
+                    "assistant_reply": parsed["content"],
+                    "thinking_content": parsed["thinking"],
+                    "tool_calls": parsed["tool_calls"],
+                    "prompt_tokens": usage.get("prompt_tokens"),
+                    "completion_tokens": usage.get("completion_tokens"),
+                    "total_tokens": usage.get("total_tokens"),
+                    "duration_ms": duration_ms,
+                    "client_ip": client_ip,
+                    "api_key_hint": api_key_hint,
+                    "path": f"/{path}",
+                    "method": request.method,
+                    "upstream_name": upstream_name,
+                    "status_code": status_code,
+                    "error_message": None,
+                }
+                await insert_log(log_data)
+                await track_api_key(api_key_hint, usage.get("total_tokens", 0), upstream_name)
+                if upstream_id:
+                    await increment_upstream_stats(upstream_id)
+            except Exception:
+                pass
+
+    response.body_iterator = logging_body_iterator()
+    return response
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=PORT)
