@@ -2,7 +2,7 @@ import { useState, lazy, Suspense, useCallback } from "react";
 import { getAdminPassword } from "@/lib/api";
 import LoginPage from "@/pages/LoginPage";
 import {
-  LayoutDashboard, ScrollText, Globe, Key, Settings, LogOut, Activity
+  LayoutDashboard, ScrollText, Globe, Key, Settings, LogOut, Activity, Star
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
