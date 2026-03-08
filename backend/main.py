@@ -476,15 +476,12 @@ async def proxy(request: Request, path: str):
     is_chat_completion = "/chat/completions" in path
     is_models_list = path.rstrip("/") in ("v1/models", "models")
     request_data = None
+    is_streaming = False
 
     if body and is_chat_completion:
         try:
             request_data = json.loads(body)
-            # Force non-streaming: always get complete JSON response with usage
-            if request_data.get("stream"):
-                request_data["stream"] = False
-                request_data.pop("stream_options", None)
-                body = json.dumps(request_data).encode("utf-8")
+            is_streaming = bool(request_data.get("stream"))
         except json.JSONDecodeError:
             pass
 
@@ -492,9 +489,6 @@ async def proxy(request: Request, path: str):
     headers = dict(request.headers)
     headers.pop("host", None)
     headers.pop("Host", None)
-    # Update content-length if body was modified
-    if is_chat_completion and request_data is not None:
-        headers["content-length"] = str(len(body))
     try:
         custom_headers = json.loads(custom_headers_json) if custom_headers_json else {}
         for k, v in custom_headers.items():
@@ -506,7 +500,15 @@ async def proxy(request: Request, path: str):
     api_key_hint = mask_api_key(request.headers.get("authorization", ""))
     start_time = time.time()
 
-    # ── Send request to upstream ──
+    # ── Streaming path ──
+    if is_chat_completion and is_streaming:
+        return await _handle_streaming_proxy(
+            request, path, target_url, headers, body, request_data,
+            log_enabled, log_only_errors, upstream_name, upstream_id,
+            client_ip, api_key_hint, start_time,
+        )
+
+    # ── Non-streaming path ──
     async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0)) as client:
         resp = await client.request(
             method=request.method, url=target_url, headers=headers, content=body,
@@ -534,7 +536,6 @@ async def proxy(request: Request, path: str):
                 if resp.status_code != 200:
                     error_msg = extract_error_summary(raw_text, resp.status_code)
 
-                # Always non-streaming JSON response
                 try:
                     resp_json = resp.json()
                 except Exception:
