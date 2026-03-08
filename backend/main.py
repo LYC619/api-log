@@ -201,7 +201,34 @@ async def admin_export_logs(
     })
 
 
+@app.patch("/admin/api/logs/{log_id}/star")
+async def admin_toggle_star(log_id: int, request: Request, _=Depends(verify_admin)):
+    body = await request.json()
+    await update_log_starred(log_id, body.get("is_starred", False))
+    return {"ok": True}
+
+
+@app.patch("/admin/api/logs/{log_id}/tags")
+async def admin_update_tags(log_id: int, request: Request, _=Depends(verify_admin)):
+    body = await request.json()
+    await update_log_tags(log_id, body.get("tags", ""))
+    return {"ok": True}
+
+
+@app.patch("/admin/api/logs/{log_id}/note")
+async def admin_update_note(log_id: int, request: Request, _=Depends(verify_admin)):
+    body = await request.json()
+    await update_log_note(log_id, body.get("note", ""))
+    return {"ok": True}
+
+
+@app.get("/admin/api/tags")
+async def admin_get_tags(_=Depends(verify_admin)):
+    return await get_all_tags()
+
+
 # ─── Upstream management ────────────────────────────────────
+
 
 @app.get("/admin/api/upstreams")
 async def admin_get_upstreams(_=Depends(verify_admin)):
