@@ -24,7 +24,11 @@ from database import (
 )
 
 UPSTREAM_URL = os.environ.get("UPSTREAM_URL", "http://127.0.0.1:3000")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
+ADMIN_PASSWORD = ""  # will be set to hash in lifespan
+
+
+def hash_password(pw: str) -> str:
+    return hashlib.sha256(pw.encode("utf-8")).hexdigest()
 PORT = int(os.environ.get("PORT", "7891"))
 VERSION = os.environ.get("APP_VERSION", "1.0.0")
 
