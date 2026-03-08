@@ -9,12 +9,12 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response, HTTPException, Depends
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import (
-    init_db, close_db, insert_log, get_logs, get_setting, set_setting,
+    init_db, close_db, get_db, insert_log, get_logs, get_setting, set_setting,
     get_dashboard_stats, get_upstreams, add_upstream, update_upstream,
     delete_upstream, activate_upstream, get_active_upstream, increment_upstream_stats,
     get_api_keys, update_api_key_note, track_api_key,
@@ -55,6 +55,67 @@ def parse_chat_response(json_data: dict) -> dict:
         "tool_calls": tool_calls_data,
         "usage": json_data.get("usage", {}),
         "model": json_data.get("model"),
+    }
+
+
+def parse_streaming_chunks(chunks: list) -> dict:
+    """Parse collected SSE streaming chunks into unified result dict."""
+    content_parts = []
+    thinking_parts = []
+    tool_calls_map = {}  # index -> {id, type, function: {name, arguments}}
+    usage = {}
+    model = None
+
+    for chunk in chunks:
+        if not chunk.get("choices"):
+            # Last chunk may only have usage
+            if chunk.get("usage"):
+                usage = chunk["usage"]
+            if chunk.get("model") and not model:
+                model = chunk["model"]
+            continue
+
+        if chunk.get("model") and not model:
+            model = chunk["model"]
+        if chunk.get("usage"):
+            usage = chunk["usage"]
+
+        delta = chunk["choices"][0].get("delta", {})
+
+        if delta.get("content"):
+            content_parts.append(delta["content"])
+
+        thinking = delta.get("thinking") or delta.get("reasoning_content") or delta.get("reasoning")
+        if thinking:
+            thinking_parts.append(thinking)
+
+        if delta.get("tool_calls"):
+            for tc in delta["tool_calls"]:
+                idx = tc.get("index", 0)
+                if idx not in tool_calls_map:
+                    tool_calls_map[idx] = {
+                        "id": tc.get("id", ""),
+                        "type": tc.get("type", "function"),
+                        "function": {"name": "", "arguments": ""},
+                    }
+                if tc.get("id"):
+                    tool_calls_map[idx]["id"] = tc["id"]
+                fn = tc.get("function", {})
+                if fn.get("name"):
+                    tool_calls_map[idx]["function"]["name"] = fn["name"]
+                if fn.get("arguments"):
+                    tool_calls_map[idx]["function"]["arguments"] += fn["arguments"]
+
+    content = "".join(content_parts)
+    thinking_text = "".join(thinking_parts) if thinking_parts else None
+    tool_calls_data = [tool_calls_map[k] for k in sorted(tool_calls_map)] if tool_calls_map else None
+
+    return {
+        "content": content,
+        "thinking": thinking_text,
+        "tool_calls": tool_calls_data,
+        "usage": usage,
+        "model": model,
     }
 
 
@@ -351,6 +412,8 @@ async def admin_clear_logs(_=Depends(verify_admin)):
 async def admin_backup(_=Depends(verify_admin)):
     if not os.path.isfile(DB_PATH):
         raise HTTPException(404, "Database file not found")
+    db = await get_db()
+    await db.execute("PRAGMA wal_checkpoint(FULL)")
     return FileResponse(DB_PATH, filename="proxy.db", media_type="application/octet-stream")
 
 
@@ -413,15 +476,12 @@ async def proxy(request: Request, path: str):
     is_chat_completion = "/chat/completions" in path
     is_models_list = path.rstrip("/") in ("v1/models", "models")
     request_data = None
+    is_streaming = False
 
     if body and is_chat_completion:
         try:
             request_data = json.loads(body)
-            # Force non-streaming: always get complete JSON response with usage
-            if request_data.get("stream"):
-                request_data["stream"] = False
-                request_data.pop("stream_options", None)
-                body = json.dumps(request_data).encode("utf-8")
+            is_streaming = bool(request_data.get("stream"))
         except json.JSONDecodeError:
             pass
 
@@ -429,9 +489,6 @@ async def proxy(request: Request, path: str):
     headers = dict(request.headers)
     headers.pop("host", None)
     headers.pop("Host", None)
-    # Update content-length if body was modified
-    if is_chat_completion and request_data is not None:
-        headers["content-length"] = str(len(body))
     try:
         custom_headers = json.loads(custom_headers_json) if custom_headers_json else {}
         for k, v in custom_headers.items():
@@ -443,7 +500,15 @@ async def proxy(request: Request, path: str):
     api_key_hint = mask_api_key(request.headers.get("authorization", ""))
     start_time = time.time()
 
-    # ── Send request to upstream ──
+    # ── Streaming path ──
+    if is_chat_completion and is_streaming:
+        return await _handle_streaming_proxy(
+            request, path, target_url, headers, body, request_data,
+            log_enabled, log_only_errors, upstream_name, upstream_id,
+            client_ip, api_key_hint, start_time,
+        )
+
+    # ── Non-streaming path ──
     async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0)) as client:
         resp = await client.request(
             method=request.method, url=target_url, headers=headers, content=body,
@@ -471,7 +536,6 @@ async def proxy(request: Request, path: str):
                 if resp.status_code != 200:
                     error_msg = extract_error_summary(raw_text, resp.status_code)
 
-                # Always non-streaming JSON response
                 try:
                     resp_json = resp.json()
                 except Exception:
@@ -518,6 +582,104 @@ async def proxy(request: Request, path: str):
         headers=resp_headers,
         media_type=resp.headers.get("content-type"),
     )
+
+
+async def _handle_streaming_proxy(
+    request: Request, path: str, target_url: str, headers: dict, body: bytes,
+    request_data: dict, log_enabled: bool, log_only_errors: bool,
+    upstream_name: str, upstream_id: int | None,
+    client_ip: str, api_key_hint: str, start_time: float,
+):
+    """Handle streaming chat completion: passthrough SSE to client, collect chunks for logging."""
+    collected_chunks = []
+
+    async def stream_generator():
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0)) as client:
+            async with client.stream(
+                method=request.method, url=target_url, headers=headers, content=body,
+            ) as resp:
+                # Yield status/headers info won't work with StreamingResponse directly,
+                # but we need to handle non-200 separately
+                stream_generator.status_code = resp.status_code
+                stream_generator.resp_headers = dict(resp.headers)
+
+                async for line in resp.aiter_lines():
+                    yield f"{line}\n\n"
+
+                    # Collect SSE data lines for logging
+                    stripped = line.strip()
+                    if stripped.startswith("data: ") and stripped != "data: [DONE]":
+                        try:
+                            chunk_json = json.loads(stripped[6:])
+                            collected_chunks.append(chunk_json)
+                        except json.JSONDecodeError:
+                            pass
+
+    stream_generator.status_code = 200
+    stream_generator.resp_headers = {}
+
+    # We need to consume the generator to get status code, so use a wrapper
+    async def wrapped_generator():
+        async for chunk in stream_generator():
+            yield chunk.encode("utf-8") if isinstance(chunk, str) else chunk
+
+    # Create response with streaming
+    response = StreamingResponse(
+        wrapped_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+    # Background logging after stream completes
+    original_body_iterator = response.body_iterator
+
+    async def logging_body_iterator():
+        async for chunk in original_body_iterator:
+            yield chunk
+
+        # Stream finished, now log
+        duration_ms = int((time.time() - start_time) * 1000)
+        status_code = stream_generator.status_code
+        should_log = log_enabled and (not log_only_errors or status_code != 200)
+
+        if should_log and collected_chunks:
+            try:
+                parsed = parse_streaming_chunks(collected_chunks)
+                usage = parsed["usage"]
+                model_name = (request_data.get("model") if request_data else None) or parsed["model"]
+
+                log_data = {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "model": model_name,
+                    "messages": request_data.get("messages") if request_data else None,
+                    "assistant_reply": parsed["content"],
+                    "thinking_content": parsed["thinking"],
+                    "tool_calls": parsed["tool_calls"],
+                    "prompt_tokens": usage.get("prompt_tokens"),
+                    "completion_tokens": usage.get("completion_tokens"),
+                    "total_tokens": usage.get("total_tokens"),
+                    "duration_ms": duration_ms,
+                    "client_ip": client_ip,
+                    "api_key_hint": api_key_hint,
+                    "path": f"/{path}",
+                    "method": request.method,
+                    "upstream_name": upstream_name,
+                    "status_code": status_code,
+                    "error_message": None,
+                }
+                await insert_log(log_data)
+                await track_api_key(api_key_hint, usage.get("total_tokens", 0), upstream_name)
+                if upstream_id:
+                    await increment_upstream_stats(upstream_id)
+            except Exception:
+                pass
+
+    response.body_iterator = logging_body_iterator()
+    return response
 
 
 if __name__ == "__main__":
